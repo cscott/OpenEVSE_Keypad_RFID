@@ -1,4 +1,5 @@
 #if defined(KEYTESTER)
+#define RTCTEST 1
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
@@ -14,8 +15,19 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
+#include "cap1214.h"
 #include "config.h"
 #define MDNS_NAME "keytester"
+
+#ifdef RTCTEST
+#include "RTClib.h"
+RTC_DS3231 rtc;
+char daysOfTheWeek[7][12] = {
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+};
+bool rtc_good = false;
+#endif /* RTCTEST */
+bool cap_good = false;
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -34,14 +46,198 @@ AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
 
+bool cap1214_write(uint8_t regno, uint8_t val) {
+  Wire.beginTransmission(CAP1214_I2C_ADDR);
+  Wire.write(regno);
+  Wire.write(val);
+  uint8_t status = Wire.endTransmission();
+  if (status != 0) {
+    return false;
+  }
+  return true;
+}
+
+bool cap1214_read(uint8_t regno, uint8_t *val) {
+    Wire.beginTransmission(CAP1214_I2C_ADDR);
+    Wire.write(regno);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
+    }
+    uint8_t nBytes = Wire.requestFrom(CAP1214_I2C_ADDR, 1);
+    if (nBytes == 0) {
+        return false;
+    }
+    *val = Wire.read();
+    return true;
+}
+
+bool cap1214_init(void) {
+  uint8_t vendor_id, product_id, revision, build_rev;
+  delay(20); // at least 20ms (tCOMM)
+  if (!cap1214_read(CAP1214_REG_VENDOR_ID, &vendor_id)) { return false; }
+  if (vendor_id != 0x5D) { return false; }
+  if (!cap1214_read(CAP1214_REG_PRODUCT_ID, &product_id)) { return false; }
+  if (product_id != 0x5A) { return false; }
+  if (!cap1214_read(CAP1214_REG_REVISION, &revision)) { return false; }
+  if (revision != 0x80) { return false; }
+  if (!cap1214_read(CAP1214_REG_BUILD_REVISION, &build_rev)) { return false; }
+  if (build_rev != 0x10) { return false; }
+  // Activate LEDs and scanning
+  cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
+  cap1214_write(CAP1214_REG_CONFIGURATION_2, 0x02); // *not* VOL_UP_DOWN
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x82); // CS1 is prox
+  // 256ms, 2kHz 110 01000
+  cap1214_write(CAP1214_REG_FEEDBACK_CONFIGURATION, 0xC8); // 256ms, 2kHz
+  // Everything triggers feedback, but CS1 and CS14
+  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_1, 0x7E);
+  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x3F);
+  // Link the sensor LEDs CS2-CS7
+  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
+  // LED/GPIO pins are outputs!
+  cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
+  return true;
+}
+
+uint16_t cap1214_read_buttons(void) {
+  uint8_t st1 = 0, st2 = 0;
+  cap1214_read(CAP1214_REG_BUTTON_STATUS_1, &st1);
+  cap1214_read(CAP1214_REG_BUTTON_STATUS_2, &st2);
+  // merge
+  uint16_t merged = (st1 & 0x3F); // zero out UP & DOWN
+  merged |= (((uint16_t)st2) << 6); // Add in high order bits at the right place
+  // manually set feedback pins for CS8-CS13
+  // CS8/9/10 -> LED8/9/10
+  uint8_t led1 = 0, led2 = 0;
+  if (merged & (((uint16_t)1)<<7)) { // CS8
+    led1 |= 0x80;
+  }
+  if (merged & (((uint16_t)1)<<8)) { // CS9
+    led2 |= 0x01;
+  }
+  if (merged & (((uint16_t)1)<<9)) { // CS10
+    led2 |= 0x02;
+  }
+  // CS11 -> LED4 (as well as CS4)
+  if (merged & (((uint16_t)1)<<3)) { // CS4
+    led1 |= 0x08;
+  }
+  if (merged & (((uint16_t)1)<<10)) { // CS11
+    led1 |= 0x08;
+  }
+  // CS12 -> LED1
+  if (merged & (((uint16_t)1)<<11)) { // CS12
+    led1 |= 0x01;
+  }
+  // CS13 -> LED11
+  if (merged & (((uint16_t)1)<<12)) { // CS13
+    led2 |= 0x04;
+  }
+  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, led1);
+  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, led2);
+  return merged;
+}
+
+void cap1214_read_key(char *key, bool *prox) {
+  uint16_t st = cap1214_read_buttons();
+  *prox = (st & 1);
+  *key = 0;
+  uint16_t mask;
+  const char *cp = "47\b158023\r96";
+  for (mask=2; *cp; cp++, mask<<=1) {
+    if (st&mask) {
+      *key = *cp;
+      return;
+    }
+  }
+}
+
 void normalText() {
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 }
+
 void invertText() {
   display.setTextColor(SH110X_BLACK, SH110X_WHITE);
 }
+
 void maybeInvertText(bool maybe) {
   if (maybe) invertText(); else normalText();
+}
+
+void printHex(uint8_t num) {
+    char buf[3];
+    snprintf(buf, sizeof(buf), "%02X", (int)num);
+    display.print(buf);
+}
+
+void updateDisplay() {
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.setTextSize(1);
+  invertText();
+  display.println("Keypad tester");
+  normalText();
+  display.print("IP: ");
+  display.println(WiFi.localIP());
+  if (mdns_success) {
+      display.println("mDNS: " MDNS_NAME);
+  }
+
+  display.setTextSize(1);
+
+  display.print("CAP ");
+  if (cap_good) {
+    uint16_t st = cap1214_read_buttons();
+    printHex(st >> 8);
+    printHex(st & 0xFF);
+    display.print(" ");
+    char key[2] = { 0, 0 }; bool prox;
+    cap1214_read_key(key, &prox);
+    switch (*key) {
+    case '\0': display.print(" "); break;
+    case '\r': display.print("ENTER"); break;
+    case '\b': display.print("BKSP"); break;
+    default: display.print(key); break;
+    }
+    if (prox) { display.print(" PROX"); }
+    display.println();
+  } else {
+    display.println("not found");
+  }
+#ifdef RTCTEST
+  if (rtc_good) {
+    DateTime now = rtc.now();
+
+    display.print(now.year(), DEC);
+    display.print('/');
+    display.print(now.month(), DEC);
+    display.print('/');
+    display.print(now.day(), DEC);
+    display.print(" (");
+    display.print(daysOfTheWeek[now.dayOfTheWeek()]);
+    display.print(") ");
+    display.print(now.hour(), DEC);
+    display.print(':');
+    display.print(now.minute(), DEC);
+    display.print(':');
+    display.print(now.second(), DEC);
+    display.println();
+
+    display.print(" since midnight 1/1/1970 = ");
+    display.print(now.unixtime());
+    display.print("s = ");
+    display.print(now.unixtime() / 86400L);
+    display.println("d");
+
+    display.print("Temperature: ");
+    display.print(rtc.getTemperature());
+    display.println(" C");
+  } else {
+    display.println("RTC not found");
+  }
+#endif
+
+  display.display();
 }
 
 void setup() {
@@ -129,43 +325,19 @@ void setup() {
   });
 
   ArduinoOTA.begin();
-}
 
-void printHex(uint8_t num) {
-    char buf[3];
-    snprintf(buf, sizeof(buf), "%02X", (int)num);
-    display.print(buf);
-}
-
-void init_keypad(void) {
-}
-
-void updateDisplay(
-) {
-  display.clearDisplay();
-  display.setCursor(0,0);
-  display.setTextSize(1);
-  invertText();
-  display.println("Keypad tester");
-  normalText();
-  display.print("IP: ");
-  display.println(WiFi.localIP());
-  if (mdns_success) {
-      display.println("mDNS: " MDNS_NAME);
+#ifdef RTCTEST
+  display.print("RTC ");
+  rtc_good = rtc.begin();
+  display.println(rtc_good ? "good": "not found");
+  if (rtc_good && rtc.lostPower()) {
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
+#endif /* RTCTEST */
 
-  display.setTextSize(1);
-#if 0
-  display.print("F#");
-  display.print(FLOWMETER_OFFSET);
-  display.print(": ");
-  display.print(count);
-  display.print(" (");
-  display.print(nBytes);
-  display.println(")");
-#endif
-
-  display.display();
+  display.print("CAP ");
+  cap_good = cap1214_init();
+  display.println(cap_good ? "good": "bad");
 }
 
 void loop() {
@@ -176,15 +348,7 @@ void loop() {
     }
     updateDelay.restart();
 
-#if 0
-    Wire.requestFrom(KEYPAD_I2C_ADDR, 8);
-    uint64_t count = 0;
-    int i;
-    for (i=0; Wire.available(); i++) {
-        count |= ((uint64_t)Wire.read()) << (8*i);
-    }
-    updateDisplay(count, i);
-#endif
+    updateDisplay();
 }
 
 #endif /* KEYTESTER */
