@@ -23,7 +23,7 @@
 #include "RTClib.h"
 RTC_DS3231 rtc;
 char daysOfTheWeek[7][12] = {
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+  "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
 };
 bool rtc_good = false;
 #endif /* RTCTEST */
@@ -86,55 +86,80 @@ bool cap1214_init(void) {
   // Activate LEDs and scanning
   cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
   cap1214_write(CAP1214_REG_CONFIGURATION_2, 0x02); // *not* VOL_UP_DOWN
-  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x82); // CS1 is prox
+  // Increase general sensitivity
+  cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 64x sensitivity
+  // (prior to boosting overall sensitivity: CA) (c8)
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0xC9); // CS1 is prox, sum, max sens
+  // allow independent configuration of CS1 threshold
+  cap1214_write(CAP1214_REG_RECALIBRATION_CONFIGURATION, 0x13); // !BUT_LD_TH
   // 256ms, 2kHz 110 01000
   cap1214_write(CAP1214_REG_FEEDBACK_CONFIGURATION, 0xC8); // 256ms, 2kHz
   // Everything triggers feedback, but CS1 and CS14
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_1, 0x7E);
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x3F);
-  // Link the sensor LEDs CS2-CS7
-  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
+  // Link the sensor LEDs CS2-CS3,CS5-CS7
+  // - excluding CS1 because it is used for proximity
+  // - excluding CS4 for which we need manual control because it is paired
+  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
+  // flip polarity of all LEDs (normally on!)
+  cap1214_write(CAP1214_REG_LED_POLARITY_1, 0xFF);
+  cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
+  // recalibrate all
+  //cap1214_write(CAP1214_REG_DIGITAL_RECALIBRATION, 0xFF);
   return true;
 }
 
-uint16_t cap1214_read_buttons(void) {
+uint16_t cap1214_read_buttons(bool clear = true) {
   uint8_t st1 = 0, st2 = 0;
   cap1214_read(CAP1214_REG_BUTTON_STATUS_1, &st1);
   cap1214_read(CAP1214_REG_BUTTON_STATUS_2, &st2);
+  if (clear) {
+    // clear the latched button status by clearing INT!
+    cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
+  }
   // merge
   uint16_t merged = (st1 & 0x3F); // zero out UP & DOWN
   merged |= (((uint16_t)st2) << 6); // Add in high order bits at the right place
   // manually set feedback pins for CS8-CS13
   // CS8/9/10 -> LED8/9/10
   uint8_t led1 = 0, led2 = 0;
-  if (merged & (((uint16_t)1)<<7)) { // CS8
+  if (merged & (((uint16_t)1)<<7)) { // CS8 (touch 11, key 0)
     led1 |= 0x80;
   }
-  if (merged & (((uint16_t)1)<<8)) { // CS9
+  if (merged & (((uint16_t)1)<<8)) { // CS9 (touch 2)
     led2 |= 0x01;
   }
-  if (merged & (((uint16_t)1)<<9)) { // CS10
+  if (merged & (((uint16_t)1)<<9)) { // CS10 (touch 3)
     led2 |= 0x02;
   }
   // CS11 -> LED4 (as well as CS4)
-  if (merged & (((uint16_t)1)<<3)) { // CS4
+  if (merged & (((uint16_t)1)<<3)) { // CS4 (touch 10, key backspace)
     led1 |= 0x08;
   }
-  if (merged & (((uint16_t)1)<<10)) { // CS11
+  if (merged & (((uint16_t)1)<<10)) { // CS11 (touch 12, key enter)
     led1 |= 0x08;
   }
   // CS12 -> LED1
-  if (merged & (((uint16_t)1)<<11)) { // CS12
+  if (merged & (((uint16_t)1)<<11)) { // CS12 (touch 9)
     led1 |= 0x01;
   }
   // CS13 -> LED11
-  if (merged & (((uint16_t)1)<<12)) { // CS13
+  if (merged & (((uint16_t)1)<<12)) { // CS13 (touch 6)
     led2 |= 0x04;
   }
-  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, led1);
-  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, led2);
+  // Update LED OUTPUT CONTROL if necessary
+  // last_* initialized to bogus values to force an initial update
+  static uint8_t last_led1 = 0xFF, last_led2 = 0xFF;
+  if (led1 != last_led1) {
+    cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, led1);
+    last_led1 = led1;
+  }
+  if (led2 != last_led2) {
+    cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, led2);
+    last_led2 = led2;
+  }
   return merged;
 }
 
@@ -177,17 +202,30 @@ void updateDisplay() {
   invertText();
   display.println("Keypad tester");
   normalText();
+#if 0
   display.print("IP: ");
   display.println(WiFi.localIP());
   if (mdns_success) {
       display.println("mDNS: " MDNS_NAME);
   }
+#endif
 
   display.setTextSize(1);
 
+#if 0
+  // Just show responding I2C addresses
+  uint8_t addr = 0;
+  for (addr = 0; addr <= 0x7F; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      printHex(addr); display.print(" ");
+    }
+  }
+  display.println();
+#else
   display.print("CAP ");
   if (cap_good) {
-    uint16_t st = cap1214_read_buttons();
+    uint16_t st = cap1214_read_buttons(false);
     printHex(st >> 8);
     printHex(st & 0xFF);
     display.print(" ");
@@ -203,7 +241,13 @@ void updateDisplay() {
     display.println();
   } else {
     display.println("not found");
+    uint8_t val = 0;
+    bool r = cap1214_read(CAP1214_REG_VENDOR_ID, &val);
+    display.print(r ? "true " : "false ");
+    printHex(val);
+    display.println();
   }
+#endif
 #ifdef RTCTEST
   if (rtc_good) {
     DateTime now = rtc.now();
@@ -338,6 +382,8 @@ void setup() {
   display.print("CAP ");
   cap_good = cap1214_init();
   display.println(cap_good ? "good": "bad");
+  display.display();
+  delay(500);
 }
 
 void loop() {
