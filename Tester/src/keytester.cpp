@@ -46,7 +46,7 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
-AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
+AsyncDelay updateDelay = AsyncDelay(100, AsyncDelay::MILLIS);
 AsyncDelay proxDelay = AsyncDelay(5000, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
@@ -112,6 +112,18 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
   // disable multiple touch suppression (since PROX aka CS1 sets it off)
   cap1214_write(CAP1214_REG_MULTIPLE_PRESS_CONFIGURATION, 0x00);
+#if 1
+  // Improve responsiveness: by default we need 3 readings over threshold;
+  // change to 1 to make things a bit snappier.
+  cap1214_write(CAP1214_REG_QUEUE_CONTROL, 0x01);
+#else
+  // Reducing sample time by 50% doesn't seem to have the same effect
+  // (probably because we're dominated by prox sampling time?)
+  cap1214_write(CAP1214_REG_QUEUE_CONTROL, 0x02);
+  cap1214_write(CAP1214_REG_SAMPLING_CHANNEL_SELECT, 0xFF);
+  cap1214_write(CAP1214_REG_SAMPLING_CONFIGURATION, 0x01); // 1.28ms sampling time
+#endif
+
 #ifdef PROXTEST
   // disable all except for CS1 (prox)
   cap1214_write(CAP1214_REG_SENSOR_ENABLE, 0x01);
