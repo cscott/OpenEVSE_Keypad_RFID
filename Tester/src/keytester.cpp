@@ -1,5 +1,8 @@
 #if defined(KEYTESTER)
+
 #define RTCTEST 1
+//#define PROXTEST 1
+
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
@@ -28,6 +31,7 @@ char daysOfTheWeek[7][12] = {
 bool rtc_good = false;
 #endif /* RTCTEST */
 bool cap_good = false;
+bool is_awake = true;
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -43,6 +47,7 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_ON  0 // active low
 
 AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
+AsyncDelay proxDelay = AsyncDelay(5000, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
 
@@ -88,8 +93,7 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_CONFIGURATION_2, 0x02); // *not* VOL_UP_DOWN
   // Increase general sensitivity
   cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 64x sensitivity
-  // (prior to boosting overall sensitivity: CA) (c8)
-  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0xC9); // CS1 is prox, sum, max sens
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x89); // CS1 is prox, max sens
   // allow independent configuration of CS1 threshold
   cap1214_write(CAP1214_REG_RECALIBRATION_CONFIGURATION, 0x13); // !BUT_LD_TH
   // 256ms, 2kHz 110 01000
@@ -106,6 +110,16 @@ bool cap1214_init(void) {
   // flip polarity of all LEDs (normally on!)
   cap1214_write(CAP1214_REG_LED_POLARITY_1, 0xFF);
   cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
+  // disable multiple touch suppression (since PROX aka CS1 sets it off)
+  cap1214_write(CAP1214_REG_MULTIPLE_PRESS_CONFIGURATION, 0x00);
+#ifdef PROXTEST
+  // disable all except for CS1 (prox)
+  cap1214_write(CAP1214_REG_SENSOR_ENABLE, 0x01);
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x88);
+  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_1, 0x01);
+  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x00);
+  cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 8x sensitivity
+#endif
   // recalibrate all
   //cap1214_write(CAP1214_REG_DIGITAL_RECALIBRATION, 0xFF);
   return true;
@@ -199,6 +213,22 @@ void updateDisplay() {
   display.clearDisplay();
   display.setCursor(0,0);
   display.setTextSize(1);
+#ifdef PROXTEST
+#define SCALE 8
+  uint8_t uval;
+  cap1214_read(CAP1214_REG_SENSOR_1_DELTA_COUNT, &uval);
+  printHex(uval);
+  int8_t val = (int8_t)uval;
+  display.print("|");
+  for (int i=-SCALE; i<0; i++) {
+    display.print(val > 0 || ((i*0x80/SCALE) < val) ? " " : "-");
+  }
+  display.print("|");
+  for (int i=0; i<SCALE; i++) {
+    display.print(val < 0 || ((i*0x80/SCALE) > val) ? " " : "+");
+  }
+  display.print("|");
+#else
   invertText();
   display.println("Keypad tester");
   normalText();
@@ -228,9 +258,31 @@ void updateDisplay() {
     uint16_t st = cap1214_read_buttons(false);
     printHex(st >> 8);
     printHex(st & 0xFF);
-    display.print(" ");
     char key[2] = { 0, 0 }; bool prox;
     cap1214_read_key(key, &prox);
+    if (prox || key[0] != 0) {
+      proxDelay.restart();
+    }
+    if (proxDelay.isExpired()) {
+      if (is_awake) {
+        // go to sleep: flip polarity to normally-off
+        cap1214_write(CAP1214_REG_LED_POLARITY_1, 0x00);
+        cap1214_write(CAP1214_REG_LED_POLARITY_2, 0x00);
+        is_awake = false;
+      }
+    } else {
+      if (!is_awake) {
+        // wake up: flip polarity to normally-on
+        cap1214_write(CAP1214_REG_LED_POLARITY_1, 0xFF);
+        cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
+        is_awake = true;
+      }
+    }
+    display.print(proxDelay.isExpired() ? "@" : "!");
+    uint8_t v2;
+    cap1214_read(CAP1214_REG_NOISE_STATUS_2, &v2); printHex(v2);
+    cap1214_read(CAP1214_REG_NOISE_STATUS_1, &v2); printHex(v2);
+    display.print(" ");
     switch (*key) {
     case '\0': display.print(" "); break;
     case '\r': display.print("ENTER"); break;
@@ -280,7 +332,7 @@ void updateDisplay() {
     display.println("RTC not found");
   }
 #endif
-
+#endif
   display.display();
 }
 
@@ -384,15 +436,22 @@ void setup() {
   display.println(cap_good ? "good": "bad");
   display.display();
   delay(500);
+  is_awake = false;
+  proxDelay.restart();
 }
 
 void loop() {
     ArduinoOTA.handle();
     MDNS.update();
+
+#ifdef PROXTEST
+    /* no update delay, just refresh as fast as possible */
+#else
     if (!updateDelay.isExpired()) {
         return;
     }
     updateDelay.restart();
+#endif
 
     updateDisplay();
 }
