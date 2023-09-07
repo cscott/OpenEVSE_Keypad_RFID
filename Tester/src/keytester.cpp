@@ -96,7 +96,7 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_GROUPED_CHANNEL_SENSOR_ENABLE, 0x3F); // disable CS14
   // Increase general sensitivity
   cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 64x sensitivity
-  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x89); // CS1 is prox, max sens
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x80); // CS1 is prox, max sens
   // allow independent configuration of CS1 threshold
   cap1214_write(CAP1214_REG_RECALIBRATION_CONFIGURATION, 0x13); // !BUT_LD_TH
   // 256ms, 2kHz 110 01000
