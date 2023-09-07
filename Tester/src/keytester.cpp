@@ -46,7 +46,7 @@ Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
 #define LED_OFF 1 // active low
 #define LED_ON  0 // active low
 
-AsyncDelay updateDelay = AsyncDelay(100, AsyncDelay::MILLIS);
+AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 AsyncDelay proxDelay = AsyncDelay(5000, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
@@ -90,7 +90,10 @@ bool cap1214_init(void) {
   if (build_rev != 0x10) { return false; }
   // Activate LEDs and scanning
   cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
+  cap1214_write(CAP1214_REG_CONFIGURATION, 0x2A);// enable recal on grouped sens, disable repeat rate
   cap1214_write(CAP1214_REG_CONFIGURATION_2, 0x02); // *not* VOL_UP_DOWN
+  cap1214_write(CAP1214_REG_GROUP_CONFIGURATION_1, 0x40); // zero out M_PRESS (CS8)
+  cap1214_write(CAP1214_REG_GROUPED_CHANNEL_SENSOR_ENABLE, 0x3F); // disable CS14
   // Increase general sensitivity
   cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 64x sensitivity
   cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x89); // CS1 is prox, max sens
@@ -98,12 +101,15 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_RECALIBRATION_CONFIGURATION, 0x13); // !BUT_LD_TH
   // 256ms, 2kHz 110 01000
   cap1214_write(CAP1214_REG_FEEDBACK_CONFIGURATION, 0xC8); // 256ms, 2kHz
-  // Everything triggers feedback, but CS1 and CS14
+  // Everything triggers feedback, but CS1, CS8, and CS14
+  // (CS8 has a weird press-and-hold misfeatures that triggers feedback
+  // before the actual press is registered in the queue.)
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_1, 0x7E);
-  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x3F);
+  cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x3E);
   // Link the sensor LEDs CS2-CS3,CS5-CS7
   // - excluding CS1 because it is used for proximity
   // - excluding CS4 for which we need manual control because it is paired
+  // - excluding UP_DOWN_LINK
   cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
@@ -138,9 +144,10 @@ bool cap1214_init(void) {
 }
 
 uint16_t cap1214_read_buttons(bool clear = true) {
-  uint8_t st1 = 0, st2 = 0;
+  uint8_t st1 = 0, st2 = 0, st3 = 0;
   cap1214_read(CAP1214_REG_BUTTON_STATUS_1, &st1);
   cap1214_read(CAP1214_REG_BUTTON_STATUS_2, &st2);
+  cap1214_read(CAP1214_REG_GROUP_STATUS, &st3); // clears TAP
   if (clear) {
     // clear the latched button status by clearing INT!
     cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
@@ -148,11 +155,24 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   // merge
   uint16_t merged = (st1 & 0x3F); // zero out UP & DOWN
   merged |= (((uint16_t)st2) << 6); // Add in high order bits at the right place
+  // account for tap and hold logic on CS8 (CS14 is unused)
+  if (st3 & 0xF) { merged |= 0x80; }
+
   // manually set feedback pins for CS8-CS13
   // CS8/9/10 -> LED8/9/10
   uint8_t led1 = 0, led2 = 0;
+  static bool saw_cs8 = false;
   if (merged & (((uint16_t)1)<<7)) { // CS8 (touch 11, key 0)
     led1 |= 0x80;
+    // Need to manually trigger feedback, because if we link this automatically
+    // feedback will be triggered for touches too short to actually register
+    // in the button queue.
+    if (!saw_cs8) {
+      cap1214_write(CAP1214_REG_FEEDBACK_ONESHOT, 0xFF);
+      saw_cs8 = true;
+    }
+  } else {
+    saw_cs8 = false;
   }
   if (merged & (((uint16_t)1)<<8)) { // CS9 (touch 2)
     led2 |= 0x01;
@@ -267,11 +287,37 @@ void updateDisplay() {
 #else
   display.print("CAP ");
   if (cap_good) {
+    uint8_t v2;
+#if 0
+    cap1214_read(CAP1214_REG_GROUP_STATUS, &v2); printHex(v2);
+#endif
+#if 0
     uint16_t st = cap1214_read_buttons(false);
     printHex(st >> 8);
     printHex(st & 0xFF);
+#endif
     char key[2] = { 0, 0 }; bool prox;
+    static char pin[5] = { "____" }; static int pinpos = 0;
+    static char last_key = 'Q';
     cap1214_read_key(key, &prox);
+    if (key[0] == last_key) {
+      /* key is still pressed, ignore */
+    } else {
+      last_key = key[0];
+      if (key[0]!='\0') {
+        if (key[0]=='\b') {
+          if (pinpos>0) { pinpos--; }
+          pin[pinpos] = '_';
+        }
+        if (pinpos==4 || key[0]=='\r') {
+          pin[0]=pin[1]=pin[2]=pin[3]='_'; pinpos=0;
+        }
+        if (key[0]!='\r' && key[0]!='\b') {
+          pin[pinpos++] = key[0];
+        }
+      }
+    }
+    display.print(pin);
     if (prox || key[0] != 0) {
       proxDelay.restart();
     }
@@ -291,9 +337,10 @@ void updateDisplay() {
       }
     }
     display.print(proxDelay.isExpired() ? "@" : "!");
-    uint8_t v2;
+#if 0
     cap1214_read(CAP1214_REG_NOISE_STATUS_2, &v2); printHex(v2);
     cap1214_read(CAP1214_REG_NOISE_STATUS_1, &v2); printHex(v2);
+#endif
     display.print(" ");
     switch (*key) {
     case '\0': display.print(" "); break;
