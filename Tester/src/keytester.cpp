@@ -1,7 +1,9 @@
 #if defined(KEYTESTER)
 
+#define HW_V2 1
 #define RTCTEST 1
 //#define PROXTEST 1
+//#define LEDTEST 1
 
 #define BRIGHT_PAD 1
 
@@ -126,11 +128,16 @@ bool cap1214_init(void) {
   // before the actual press is registered in the queue.)
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_1, 0x7E);
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x3E);
-  // Link the sensor LEDs CS2-CS3,CS5-CS7
+  // Link the sensor LEDs CS2-CS7
   // - excluding CS1 because it is used for proximity
-  // - excluding CS4 for which we need manual control because it is paired
   // - excluding UP_DOWN_LINK
+#ifdef HW_V2
+  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
+#else
+  // In v1 hardware, also:
+  // - excluding CS4 for which we need manual control because it is paired
   cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
+#endif
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
   // flip polarity of all LEDs (normally off, to keep power low)
@@ -159,6 +166,24 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_FEEDBACK_CHANNEL_CONFIGURATION_2, 0x00);
   cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 8x sensitivity
 #endif
+
+#ifdef LEDTEST
+  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x00);
+  for (uint8_t i=0; i<8; i++) {
+    cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, 1<<i);
+    cap1214_write(CAP1214_REG_FEEDBACK_ONESHOT, 0xFF);
+    delay(1000);
+  }
+  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, 0);
+  for (uint8_t i=0; i<3; i++) {
+    cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, 1<<i);
+    cap1214_write(CAP1214_REG_FEEDBACK_ONESHOT, 0xFF);
+    delay(1000);
+  }
+  cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, 0);
+  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
+#endif
+
   // recalibrate all
   //cap1214_write(CAP1214_REG_DIGITAL_RECALIBRATION, 0xFF);
   return true;
@@ -183,11 +208,12 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   // account for tap and hold logic on CS8 (CS14 is unused)
   if (st3 & 0xF) { merged |= 0x80; }
 
+#define merged_cs(x) (merged & (((uint16_t)1)<<(x-1)))
   // manually set feedback pins for CS8-CS13
   // CS8/9/10 -> LED8/9/10
   uint8_t led1 = 0, led2 = 0;
   static bool saw_cs8 = false;
-  if (merged & (((uint16_t)1)<<7)) { // CS8 (touch 11, key 0)
+  if (merged_cs(8)) { // CS8 (touch 11, key 0)
     led1 |= 0x80;
     // Need to manually trigger feedback, because if we link this automatically
     // feedback will be triggered for touches too short to actually register
@@ -199,26 +225,36 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   } else {
     saw_cs8 = false;
   }
-  if (merged & (((uint16_t)1)<<8)) { // CS9 (touch 2)
-    led2 |= 0x01;
+  if (merged_cs(9)) { // CS9 (touch 2)
+    led2 |= 0x01; // LED 9
   }
-  if (merged & (((uint16_t)1)<<9)) { // CS10 (touch 3)
-    led2 |= 0x02;
+  if (merged_cs(10)) { // CS10 (touch 3)
+    led2 |= 0x02; // LED 10
   }
-  // CS11 -> LED4 (as well as CS4)
-  if (merged & (((uint16_t)1)<<3)) { // CS4 (touch 10, key backspace)
-    led1 |= 0x08;
+#ifdef HW_V2
+  // CS11 & CS13 -> LED11
+  if (merged_cs(13)) { // CS13 (touch 10, key backspace)
+    led2 |= 0x04; // LED 11
   }
-  if (merged & (((uint16_t)1)<<10)) { // CS11 (touch 12, key enter)
-    led1 |= 0x08;
+  if (merged_cs(11)) { // CS11 (touch 12, key enter)
+    led2 |= 0x04; // LED 11
   }
-  // CS12 -> LED1
-  if (merged & (((uint16_t)1)<<11)) { // CS12 (touch 9)
-    led1 |= 0x01;
+#else
+  // CS4 & CS11 -> LED4
+  if (merged_cs(4)) { // CS4 (touch 10, key backspace)
+    led1 |= 0x08; // LED 4
+  }
+  if (merged_cs(11)) { // CS11 (touch 12, key enter)
+    led1 |= 0x08; // LED 4
   }
   // CS13 -> LED11
-  if (merged & (((uint16_t)1)<<12)) { // CS13 (touch 6)
+  if (merged_cs(13)) { // CS13 (touch 6)
     led2 |= 0x04;
+  }
+#endif
+  // CS12 -> LED1
+  if (merged_cs(12)) { // CS12 (touch 9)
+    led1 |= 0x01; // LED 1
   }
   // Update LED OUTPUT CONTROL if necessary
   // last_* initialized to bogus values to force an initial update
@@ -239,7 +275,12 @@ void cap1214_read_key(char *key, bool *prox) {
   *prox = (st & 1);
   *key = 0;
   uint16_t mask;
-  const char *cp = "47\b158023\r96";
+  const char *cp =
+#ifdef HW_V2
+    "476158023\r9\b";
+#else
+    "47\b158023\r96";
+#endif
   for (mask=2; *cp; cp++, mask<<=1) {
     if (st&mask) {
       *key = *cp;
