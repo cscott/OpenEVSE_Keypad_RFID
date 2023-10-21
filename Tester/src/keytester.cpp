@@ -3,6 +3,26 @@
 #define RTCTEST 1
 //#define PROXTEST 1
 
+#define BRIGHT_PAD 1
+
+// Note that Capacitive sensing is significantly more sensitive when the
+// system has a robust earth ground, which is the case when the OpenEVSE
+// is installed but may not be the case if attempting to calibrate on a
+// bench.
+
+// Sensitivity is 0-15 with 15 being max sensitivity; each step is 2x
+// sensitivity of previous step.
+#define PROX_SENSITIVITY 15 /* when installed is 13 */
+#define KEY_SENSITIVITY 14 /* when installed is 13 */
+
+#ifdef BRIGHT_PAD
+# define POLARITY_AWAKE 0xFF
+# define POLARITY_ASLEEP 0x00
+#else
+# define POLARITY_AWAKE 0x00
+# define POLARITY_ASLEEP 0xFF
+#endif
+
 #include "Arduino.h"
 #include <Wire.h>
 #include <AsyncDelay.h>
@@ -18,7 +38,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
-#include "cap1214.h"
+#include "cap1214-reg.h"
 #include "config.h"
 #define MDNS_NAME "keytester"
 
@@ -80,14 +100,14 @@ bool cap1214_read(uint8_t regno, uint8_t *val) {
 bool cap1214_init(void) {
   uint8_t vendor_id, product_id, revision, build_rev;
   delay(20); // at least 20ms (tCOMM)
-  if (!cap1214_read(CAP1214_REG_VENDOR_ID, &vendor_id)) { return false; }
-  if (vendor_id != 0x5D) { return false; }
-  if (!cap1214_read(CAP1214_REG_PRODUCT_ID, &product_id)) { return false; }
-  if (product_id != 0x5A) { return false; }
-  if (!cap1214_read(CAP1214_REG_REVISION, &revision)) { return false; }
-  if (revision != 0x80) { return false; }
-  if (!cap1214_read(CAP1214_REG_BUILD_REVISION, &build_rev)) { return false; }
-  if (build_rev != 0x10) { return false; }
+  if (!cap1214_read(CAP1214_REG_VENDOR_ID, &vendor_id)) { goto failed; }
+  if (vendor_id != 0x5D) { goto failed; }
+  if (!cap1214_read(CAP1214_REG_PRODUCT_ID, &product_id)) { goto failed; }
+  if (product_id != 0x5A) { goto failed; }
+  if (!cap1214_read(CAP1214_REG_REVISION, &revision)) { goto failed; }
+  if (revision != 0x80) { goto failed; }
+  if (!cap1214_read(CAP1214_REG_BUILD_REVISION, &build_rev)) { goto failed; }
+  if (build_rev != 0x10) { goto failed; }
   // Activate LEDs and scanning
   cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
   cap1214_write(CAP1214_REG_CONFIGURATION, 0x2A);// enable recal on grouped sens, disable repeat rate
@@ -95,8 +115,8 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_GROUP_CONFIGURATION_1, 0x40); // zero out M_PRESS (CS8)
   cap1214_write(CAP1214_REG_GROUPED_CHANNEL_SENSOR_ENABLE, 0x3F); // disable CS14
   // Increase general sensitivity
-  cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x1F); // 64x sensitivity
-  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x80); // CS1 is prox, max sens
+  cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x0F + 16*(15-KEY_SENSITIVITY)); // 64x sensitivity
+  cap1214_write(CAP1214_REG_PROXIMITY_CONTROL, 0x80 + (15-PROX_SENSITIVITY)); // CS1 is prox, max sens
   // allow independent configuration of CS1 threshold
   cap1214_write(CAP1214_REG_RECALIBRATION_CONFIGURATION, 0x13); // !BUT_LD_TH
   // 256ms, 2kHz 110 01000
@@ -113,9 +133,10 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
-  // flip polarity of all LEDs (normally on!)
-  cap1214_write(CAP1214_REG_LED_POLARITY_1, 0xFF);
-  cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
+  // flip polarity of all LEDs (normally off, to keep power low)
+  cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
+  cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
+
   // disable multiple touch suppression (since PROX aka CS1 sets it off)
   cap1214_write(CAP1214_REG_MULTIPLE_PRESS_CONFIGURATION, 0x00);
 #if 1
@@ -141,6 +162,9 @@ bool cap1214_init(void) {
   // recalibrate all
   //cap1214_write(CAP1214_REG_DIGITAL_RECALIBRATION, 0xFF);
   return true;
+
+ failed:
+  return false;
 }
 
 uint16_t cap1214_read_buttons(bool clear = true) {
@@ -152,6 +176,7 @@ uint16_t cap1214_read_buttons(bool clear = true) {
     // clear the latched button status by clearing INT!
     cap1214_write(CAP1214_REG_MAIN_STATUS, 0x00);
   }
+
   // merge
   uint16_t merged = (st1 & 0x3F); // zero out UP & DOWN
   merged |= (((uint16_t)st2) << 6); // Add in high order bits at the right place
@@ -287,8 +312,8 @@ void updateDisplay() {
 #else
   display.print("CAP ");
   if (cap_good) {
-    uint8_t v2;
 #if 0
+    uint8_t v2;
     cap1214_read(CAP1214_REG_GROUP_STATUS, &v2); printHex(v2);
 #endif
 #if 0
@@ -324,15 +349,15 @@ void updateDisplay() {
     if (proxDelay.isExpired()) {
       if (is_awake) {
         // go to sleep: flip polarity to normally-off
-        cap1214_write(CAP1214_REG_LED_POLARITY_1, 0x00);
-        cap1214_write(CAP1214_REG_LED_POLARITY_2, 0x00);
+        cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
+        cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
         is_awake = false;
       }
     } else {
       if (!is_awake) {
         // wake up: flip polarity to normally-on
-        cap1214_write(CAP1214_REG_LED_POLARITY_1, 0xFF);
-        cap1214_write(CAP1214_REG_LED_POLARITY_2, 0xFF);
+        cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_AWAKE);
+        cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_AWAKE);
         is_awake = true;
       }
     }
