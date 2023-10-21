@@ -2,6 +2,7 @@
 
 #define HW_V2 1
 #define RTCTEST 1
+#define TEMPTEST 1
 //#define PROXTEST 1
 //#define LEDTEST 1
 
@@ -43,6 +44,12 @@
 #include "cap1214-reg.h"
 #include "config.h"
 #define MDNS_NAME "keytester"
+
+#ifdef TEMPTEST
+#include "Adafruit_MCP9808.h"
+Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
+bool tempsensor_good = false;
+#endif
 
 #ifdef RTCTEST
 #include "RTClib.h"
@@ -425,6 +432,14 @@ void updateDisplay() {
     display.println();
   }
 #endif
+#ifdef TEMPTEST
+  if (tempsensor_good) {
+    float f = tempsensor.readTempF();
+    display.print("Temp: ");
+    display.print(f, 4);
+    display.println();
+  }
+#endif
 #ifdef RTCTEST
   if (rtc_good) {
     DateTime now = rtc.now();
@@ -555,6 +570,16 @@ void setup() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 #endif /* RTCTEST */
+
+#ifdef TEMPTEST
+  display.print("MCP9808 ");
+  tempsensor_good = tempsensor.begin(MCP9808_I2CADDR_DEFAULT);
+  display.println(tempsensor_good ? "good" : "not found");
+  if (tempsensor_good) {
+    tempsensor.setResolution(0); // every 30ms, 0.5C resolution
+    tempsensor.wake();
+  }
+#endif /* TEMPTEST */
 
   display.print("CAP ");
   cap_good = cap1214_init();
