@@ -3,10 +3,12 @@
 #define HW_V2 1
 #define RTCTEST 1
 #define TEMPTEST 1
+#define RFIDTEST 1
 //#define PROXTEST 1
 //#define LEDTEST 1
 
 #define BRIGHT_PAD 1
+#define LONG_WAIT_AFTER_INIT
 
 // Note that Capacitive sensing is significantly more sensitive when the
 // system has a robust earth ground, which is the case when the OpenEVSE
@@ -44,6 +46,12 @@
 #include "cap1214-reg.h"
 #include "config.h"
 #define MDNS_NAME "keytester"
+
+#ifdef RFIDTEST
+#include "Adafruit_PN532.h"
+Adafruit_PN532 rfid(-1, -1, &Wire);
+bool rfid_good = false;
+#endif
 
 #ifdef TEMPTEST
 #include "Adafruit_MCP9808.h"
@@ -432,6 +440,27 @@ void updateDisplay() {
     display.println();
   }
 #endif
+#ifdef RFIDTEST
+  if (rfid_good) {
+    display.print("RFID: ");
+    uint8_t rfid_success;
+    uint8_t uid[] = { 0, 0, 0, 0, 0, 0, 0 };  // Buffer to store the returned UID
+    uint8_t uidLength;                        // Length of the UID (4 or 7 bytes depending on ISO14443A card type)
+    rfid_success = rfid.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 100);
+    if (rfid_success) {
+      display.print(uidLength); display.print(" ");
+      for (uint8_t i=0; i<uidLength; i++) {
+        printHex(uid[i]);
+      }
+      display.println();
+      if (cap_good) {
+        cap1214_write(CAP1214_REG_FEEDBACK_ONESHOT, 0xFF);
+      }
+    } else {
+      display.println("(listening)");
+    }
+  }
+#endif
 #ifdef TEMPTEST
   if (tempsensor_good) {
     float f = tempsensor.readTempF();
@@ -581,11 +610,30 @@ void setup() {
   }
 #endif /* TEMPTEST */
 
+#ifdef RFIDTEST
+  display.print("RFID: ");
+  rfid_good = rfid.begin();
+  if (rfid_good) {
+    uint32_t versiondata = rfid.getFirmwareVersion();
+    if (versiondata==0) {
+      rfid_good = false;
+    }
+    display.print("PN5"); printHex((versiondata>>24) & 0xFF);
+    display.print(" v"); display.print((versiondata>>16) & 0xFF);
+    display.print("."); display.print((versiondata>>8) & 0xFF);
+    display.println();
+  } else {
+    display.println("not found");
+  }
+#endif
+
   display.print("CAP ");
   cap_good = cap1214_init();
   display.println(cap_good ? "good": "bad");
   display.display();
-  delay(500);
+#ifdef LONG_WAIT_AFTER_INIT
+  delay(5000);
+#endif
   is_awake = false;
   proxDelay.restart();
 }
