@@ -130,6 +130,7 @@ bool cap1214_init(void) {
   cap1214_write(CAP1214_REG_CONFIGURATION, 0x2A);// enable recal on grouped sens, disable repeat rate
   cap1214_write(CAP1214_REG_CONFIGURATION_2, 0x02); // *not* VOL_UP_DOWN
   cap1214_write(CAP1214_REG_GROUP_CONFIGURATION_1, 0x40); // zero out M_PRESS (CS8)
+  cap1214_write(CAP1214_REG_SENSOR_ENABLE, 0xFF);
   cap1214_write(CAP1214_REG_GROUPED_CHANNEL_SENSOR_ENABLE, 0x3F); // disable CS14
   // Increase general sensitivity
   cap1214_write(CAP1214_REG_DATA_SENSITIVITY, 0x0F + 16*(15-KEY_SENSITIVITY)); // 64x sensitivity
