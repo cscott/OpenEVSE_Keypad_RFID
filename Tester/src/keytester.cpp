@@ -272,6 +272,7 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   if (merged_cs(12)) { // CS12 (touch 9)
     led1 |= 0x01; // LED 1
   }
+#undef merged_cs
   // Update LED OUTPUT CONTROL if necessary
   // last_* initialized to bogus values to force an initial update
   static uint8_t last_led1 = 0xFF, last_led2 = 0xFF;
