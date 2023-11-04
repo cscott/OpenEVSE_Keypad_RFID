@@ -1,6 +1,5 @@
 #if defined(KEYTESTER)
 
-#define HW_V2 1
 #define RTCTEST 1
 #define TEMPTEST 1
 #define RFIDTEST 1
@@ -47,6 +46,12 @@
 #include "config.h"
 #define MDNS_NAME "keytester"
 
+#define PCA9536_I2C_ADDR     0x41
+#define PCA9536_REG_INPUT    0x00
+#define PCA9536_REG_OUTPUT   0x01
+#define PCA9536_REG_POLARITY 0x02
+#define PCA9536_REG_CONFIG   0x03
+
 #ifdef RFIDTEST
 #include "Adafruit_PN532.h"
 Adafruit_PN532 rfid(-1, -1, &Wire);
@@ -69,6 +74,7 @@ bool rtc_good = false;
 #endif /* RTCTEST */
 bool cap_good = false;
 bool is_awake = true;
+bool keypad_hw_v2 = false;
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -87,6 +93,50 @@ AsyncDelay updateDelay = AsyncDelay(250, AsyncDelay::MILLIS);
 AsyncDelay proxDelay = AsyncDelay(5000, AsyncDelay::MILLIS);
 bool blinkWasOn = false;
 bool mdns_success;
+
+bool pca9536_write(uint8_t regno, uint8_t val) {
+  Wire.beginTransmission(PCA9536_I2C_ADDR);
+  Wire.write(regno);
+  Wire.write(val);
+  uint8_t status = Wire.endTransmission();
+  if (status != 0) {
+    return false;
+  }
+  return true;
+}
+
+bool pca9536_read(uint8_t regno, uint8_t *val) {
+    Wire.beginTransmission(PCA9536_I2C_ADDR);
+    Wire.write(regno);
+    uint8_t status = Wire.endTransmission();
+    if (status != 0) {
+        return false;
+    }
+    uint8_t nBytes = Wire.requestFrom(PCA9536_I2C_ADDR, 1);
+    if (nBytes == 0) {
+        return false;
+    }
+    *val = Wire.read();
+    return true;
+}
+
+int read_keypad_version() {
+  // Configure to all inputs (also implicitly check to see whether it's present)
+  if (!pca9536_write(PCA9536_REG_CONFIG, 0xFF)) { goto failed; }
+  // Read the version pins!
+  uint8_t version;
+  if (!pca9536_read(PCA9536_REG_INPUT, &version)) { goto failed; }
+  if ((version & 0x0E) == 0) {
+    // this is version 1! First pin configure for output
+    if (!pca9536_write(PCA9536_REG_POLARITY, 0x00)) { goto failed; }
+    if (!pca9536_write(PCA9536_REG_OUTPUT, 0x00)) { goto failed; }
+    if (!pca9536_write(PCA9536_REG_CONFIG, 0xFE)) { goto failed; }
+    return 2; // Keypad HW v2
+  }
+  // Fall through -- this is an unrecognized version
+ failed:
+  return 1; // Keypad v1 didn't have a PCA9536
+}
 
 bool cap1214_write(uint8_t regno, uint8_t val) {
   Wire.beginTransmission(CAP1214_I2C_ADDR);
@@ -147,18 +197,21 @@ bool cap1214_init(void) {
   // Link the sensor LEDs CS2-CS7
   // - excluding CS1 because it is used for proximity
   // - excluding UP_DOWN_LINK
-#ifdef HW_V2
-  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
-#else
-  // In v1 hardware, also:
-  // - excluding CS4 for which we need manual control because it is paired
-  cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
-#endif
+  if (keypad_hw_v2) {
+    cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x7E);
+  } else {
+    // In v1 hardware, also:
+    // - excluding CS4 for which we need manual control because it is paired
+    cap1214_write(CAP1214_REG_SENSOR_LED_LINKING, 0x76);
+  }
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
   // flip polarity of all LEDs (normally off, to keep power low)
   cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
   cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
+  if (keypad_hw_v2) {
+    pca9536_write(PCA9536_REG_POLARITY, POLARITY_ASLEEP);
+  }
 
   // disable multiple touch suppression (since PROX aka CS1 sets it off)
   cap1214_write(CAP1214_REG_MULTIPLE_PRESS_CONFIGURATION, 0x00);
@@ -227,7 +280,7 @@ uint16_t cap1214_read_buttons(bool clear = true) {
 #define merged_cs(x) (merged & (((uint16_t)1)<<(x-1)))
   // manually set feedback pins for CS8-CS13
   // CS8/9/10 -> LED8/9/10
-  uint8_t led1 = 0, led2 = 0;
+  uint8_t led1 = 0, led2 = 0, led3 = 0;
   static bool saw_cs8 = false;
   if (merged_cs(8)) { // CS8 (touch 11, key 0)
     led1 |= 0x80;
@@ -247,27 +300,27 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   if (merged_cs(10)) { // CS10 (touch 3)
     led2 |= 0x02; // LED 10
   }
-#ifdef HW_V2
-  // CS11 & CS13 -> LED11
-  if (merged_cs(13)) { // CS13 (touch 10, key backspace)
-    led2 |= 0x04; // LED 11
+  if (keypad_hw_v2) {
+    // CS11 & CS13 -> LED11/LED12 (expansion)
+    if (merged_cs(13)) { // CS13 (touch 10, key backspace)
+      led2 |= 0x04; // LED 11
+    }
+    if (merged_cs(11)) { // CS11 (touch 12, key enter)
+      led3 |= 0x01; // LED 12
+    }
+  } else {
+    // CS4 & CS11 -> LED4
+    if (merged_cs(4)) { // CS4 (touch 10, key backspace)
+      led1 |= 0x08; // LED 4
+    }
+    if (merged_cs(11)) { // CS11 (touch 12, key enter)
+      led1 |= 0x08; // LED 4
+    }
+    // CS13 -> LED11
+    if (merged_cs(13)) { // CS13 (touch 6)
+      led2 |= 0x04;
+    }
   }
-  if (merged_cs(11)) { // CS11 (touch 12, key enter)
-    led2 |= 0x04; // LED 11
-  }
-#else
-  // CS4 & CS11 -> LED4
-  if (merged_cs(4)) { // CS4 (touch 10, key backspace)
-    led1 |= 0x08; // LED 4
-  }
-  if (merged_cs(11)) { // CS11 (touch 12, key enter)
-    led1 |= 0x08; // LED 4
-  }
-  // CS13 -> LED11
-  if (merged_cs(13)) { // CS13 (touch 6)
-    led2 |= 0x04;
-  }
-#endif
   // CS12 -> LED1
   if (merged_cs(12)) { // CS12 (touch 9)
     led1 |= 0x01; // LED 1
@@ -275,7 +328,7 @@ uint16_t cap1214_read_buttons(bool clear = true) {
 #undef merged_cs
   // Update LED OUTPUT CONTROL if necessary
   // last_* initialized to bogus values to force an initial update
-  static uint8_t last_led1 = 0xFF, last_led2 = 0xFF;
+  static uint8_t last_led1 = 0xFF, last_led2 = 0xFF, last_led3 = 0xFF;
   if (led1 != last_led1) {
     cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, led1);
     last_led1 = led1;
@@ -283,6 +336,10 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   if (led2 != last_led2) {
     cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, led2);
     last_led2 = led2;
+  }
+  if (keypad_hw_v2 && led3 != last_led3) {
+    pca9536_write(PCA9536_REG_OUTPUT, led3);
+    last_led3 = led3;
   }
   return merged;
 }
@@ -292,12 +349,9 @@ void cap1214_read_key(char *key, bool *prox) {
   *prox = (st & 1);
   *key = 0;
   uint16_t mask;
-  const char *cp =
-#ifdef HW_V2
-    "476158023\r9\b";
-#else
+  const char *cp = keypad_hw_v2 ?
+    "476158023\r9\b" :
     "47\b158023\r96";
-#endif
   for (mask=2; *cp; cp++, mask<<=1) {
     if (st&mask) {
       *key = *cp;
@@ -409,6 +463,9 @@ void updateDisplay() {
         // go to sleep: flip polarity to normally-off
         cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
         cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
+        if (keypad_hw_v2) {
+          pca9536_write(PCA9536_REG_POLARITY, POLARITY_ASLEEP);
+        }
         is_awake = false;
       }
     } else {
@@ -416,6 +473,9 @@ void updateDisplay() {
         // wake up: flip polarity to normally-on
         cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_AWAKE);
         cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_AWAKE);
+        if (keypad_hw_v2) {
+          pca9536_write(PCA9536_REG_POLARITY, POLARITY_AWAKE);
+        }
         is_awake = true;
       }
     }
@@ -593,6 +653,11 @@ void setup() {
 
   ArduinoOTA.begin();
 
+  display.print("IO EXP v");
+  int kp_ver = read_keypad_version();
+  keypad_hw_v2 = (kp_ver == 2);
+  display.println(kp_ver);
+
 #ifdef RTCTEST
   display.print("RTC ");
   rtc_good = rtc.begin();
@@ -631,7 +696,7 @@ void setup() {
 
   display.print("CAP ");
   cap_good = cap1214_init();
-  display.println(cap_good ? "good": "bad");
+  display.println(cap_good ? "good": "not found");
   display.display();
 #ifdef LONG_WAIT_AFTER_INIT
   delay(5000);
