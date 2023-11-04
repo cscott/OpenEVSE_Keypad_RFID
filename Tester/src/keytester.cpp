@@ -75,6 +75,7 @@ bool rtc_good = false;
 bool cap_good = false;
 bool is_awake = true;
 bool keypad_hw_v2 = false;
+uint8_t polarity = 0;
 
 // Configuration of OLED display
 Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -123,13 +124,13 @@ bool pca9536_read(uint8_t regno, uint8_t *val) {
 int read_keypad_version() {
   // Configure to all inputs (also implicitly check to see whether it's present)
   if (!pca9536_write(PCA9536_REG_CONFIG, 0xFF)) { goto failed; }
+  if (!pca9536_write(PCA9536_REG_POLARITY, 0x00)) { goto failed; }
   // Read the version pins!
   uint8_t version;
   if (!pca9536_read(PCA9536_REG_INPUT, &version)) { goto failed; }
   if ((version & 0x0E) == 0) {
     // this is version 1! First pin configure for output
-    if (!pca9536_write(PCA9536_REG_POLARITY, 0x00)) { goto failed; }
-    if (!pca9536_write(PCA9536_REG_OUTPUT, 0x00)) { goto failed; }
+    if (!pca9536_write(PCA9536_REG_OUTPUT, 0x01)) { goto failed; }
     if (!pca9536_write(PCA9536_REG_CONFIG, 0xFE)) { goto failed; }
     return 2; // Keypad HW v2
   }
@@ -207,11 +208,9 @@ bool cap1214_init(void) {
   // LED/GPIO pins are outputs!
   cap1214_write(CAP1214_REG_LED_GPIO_DIRECTION, 0xFF); // LED1-LED8 = output
   // flip polarity of all LEDs (normally off, to keep power low)
-  cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
-  cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
-  if (keypad_hw_v2) {
-    pca9536_write(PCA9536_REG_POLARITY, POLARITY_ASLEEP);
-  }
+  polarity = POLARITY_ASLEEP;
+  cap1214_write(CAP1214_REG_LED_POLARITY_1, polarity);
+  cap1214_write(CAP1214_REG_LED_POLARITY_2, polarity);
 
   // disable multiple touch suppression (since PROX aka CS1 sets it off)
   cap1214_write(CAP1214_REG_MULTIPLE_PRESS_CONFIGURATION, 0x00);
@@ -329,6 +328,7 @@ uint16_t cap1214_read_buttons(bool clear = true) {
   // Update LED OUTPUT CONTROL if necessary
   // last_* initialized to bogus values to force an initial update
   static uint8_t last_led1 = 0xFF, last_led2 = 0xFF, last_led3 = 0xFF;
+  static uint8_t last_polarity = 0x55;
   if (led1 != last_led1) {
     cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_1, led1);
     last_led1 = led1;
@@ -337,9 +337,14 @@ uint16_t cap1214_read_buttons(bool clear = true) {
     cap1214_write(CAP1214_REG_LED_OUTPUT_CONTROL_2, led2);
     last_led2 = led2;
   }
-  if (keypad_hw_v2 && led3 != last_led3) {
-    pca9536_write(PCA9536_REG_OUTPUT, led3);
+  if (keypad_hw_v2 && (led3 != last_led3 || polarity != last_polarity)) {
+    pca9536_write(PCA9536_REG_OUTPUT, led3 ^ (~polarity));
     last_led3 = led3;
+  }
+  if (polarity != last_polarity) {
+    cap1214_write(CAP1214_REG_LED_POLARITY_1, polarity);
+    cap1214_write(CAP1214_REG_LED_POLARITY_2, polarity);
+    last_polarity = polarity;
   }
   return merged;
 }
@@ -461,21 +466,13 @@ void updateDisplay() {
     if (proxDelay.isExpired()) {
       if (is_awake) {
         // go to sleep: flip polarity to normally-off
-        cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_ASLEEP);
-        cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_ASLEEP);
-        if (keypad_hw_v2) {
-          pca9536_write(PCA9536_REG_POLARITY, POLARITY_ASLEEP);
-        }
+        polarity = POLARITY_ASLEEP;
         is_awake = false;
       }
     } else {
       if (!is_awake) {
         // wake up: flip polarity to normally-on
-        cap1214_write(CAP1214_REG_LED_POLARITY_1, POLARITY_AWAKE);
-        cap1214_write(CAP1214_REG_LED_POLARITY_2, POLARITY_AWAKE);
-        if (keypad_hw_v2) {
-          pca9536_write(PCA9536_REG_POLARITY, POLARITY_AWAKE);
-        }
+        polarity = POLARITY_AWAKE;
         is_awake = true;
       }
     }
