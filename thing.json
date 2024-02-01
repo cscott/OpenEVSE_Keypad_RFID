@@ -1,0 +1,111 @@
+{
+    "id": "c6539aa6-b8c7-4adf-a22c-1baba5bbef97",
+    "title": "OpenEVSE Capacitive keypad and RFID reader",
+    "description": "<p>This repository contains hardware design files for a capacitive\nkeypad and RFID reader for <a href=\"https://www.openevse.com/\">OpenEVSE</a> hardware.</p>\n<p></p>\n<p>More details can be found on the\n<a href=\"https://hackaday.io/project/194656-openevse-capacitive-keypad-rfid\">Hackaday page for this project</a>.</p>\n<p></p>",
+    "url": "https://github.com/cscott/OpenEVSE_Keypad_RFID",
+    "downloadUrl": "https://github.com/cscott/OpenEVSE_Keypad_RFID/zipball/main",
+    "version": 2,
+    "authors": [
+        {
+            "name": "C. Scott Ananian",
+            "url": "https://cscott.net",
+            "email": "things@cscott.net"
+        }
+    ],
+    "created": "2024-01-31T20:32:00-04:00",
+    "licenses": [
+        "CC-BY-SA-4.0"
+    ],
+    "thumbnailUrls": [
+        "imgs/finished-rev2.jpg"
+    ],
+    "media": [
+        "PCB"
+    ],
+    "categories": [
+        "OpenEVSE"
+    ],
+    "tags": [
+        "openevse"
+    ],
+    "billOfMaterials": [
+        {
+            "partNumber": "1",
+            "description": "OpenEVSE Advanced Series",
+            "url": "https://store.openevse.com/collections/all-products",
+            "type": "thing"
+        },
+        {
+            "partNumber": "2",
+            "description": "Clear cover to a Polycase ML-58 enclosure",
+            "url": "https://www.polycase.com/ml-58f",
+            "type": "thing"
+        },
+        {
+            "partNumber": "3",
+            "description": "PCB schematic (PDF)",
+            "url": "Keypad-Front/Keypad.pdf",
+            "type": "generated",
+            "mimetype": "application/pdf"
+        },
+        {
+            "partNumber": "4",
+            "description": "LCD mount"
+        },
+        {
+            "partNumber": "5",
+            "description": "I2C cable assembly",
+            "type": "thing"
+        }
+    ],
+    "instructions": [
+        {
+            "step": 1,
+            "text": "<b>Purchase components</b><br>\n<p>You will need to purchase a new\n<a href=\"https://www.polycase.com/ml-58f\">Polycase ML-58 enclosure</a>, although\nthe only part we will need from it is the clear front cover.  (Perhaps\nwe can arrange a special purchase of just the cover if demand\nwarrants.)</p>\n<p>You will also need to purchase or have the Keypad PCB fabricated.  The\nKiCad design files are in the <a href=\"https://github.com/cscott/OpenEVSE_Keypad_RFID/raw/master/Keypad-Front\"><code>Keypad-Front</code></a>\nsubdirectory. It’s a four-layer PCB, and I recommend white silkscreen\nto avoid heating when in direct sun.  I used 1oz copper on a standard\n1.6mm thick PCB.  I found that <a href=\"https://jlcpcb.com/\">JLCPCB</a> had\nvery reasonable prices.</p>\n<p>I assume you also own an\n<a href=\"https://store.openevse.com/collections/all-products\">OpenEVSE Advanced Series</a>\nand have assembled it.</p>\n<p>You will also need an LCD mount, which can be 3d printed.  You <em>might</em>\nbe able to reuse the one from your existing OpenEVSE device, but\nyou’ll need to pry the glue off then cut down the top bar. It’s\nprobably easier just to print a new one.</p>\n<p>TODO: image and STL of LCD mount.</p>\n<p>For compatibility with the latest OpenEVSE web interface, you will\nalso need to update the firmware on your main OpenEVSE controller\nboard.  This is out of scope for this guide, but you can find\ninstructions HERE.  It’s a good thing to do between step 3 and 4\nwhen you have your OpenEVSE charger disconnected and open.</p>"
+        },
+        {
+            "step": 2,
+            "text": "<b>Purchase or fabricate I2C cable</b><br>\n<p>You will also need an I2C cable from the OpenEVSE Wifi board.  If you\nhave the latest-generation WiFi board, this will be a STEMMA-QT cable\n(JST-SH, with 1.0mm pitch).  Older boards had an 8-pin JST-PH\nconnector (2.0mm pitch) and you will have to fabricate an adapter\nyourself.</p>\n<p>TODO: photos here</p>"
+        },
+        {
+            "step": 3,
+            "text": "<b>Remove cover from OpenEVSE</b><br>\n<p>Unplug your OpenEVSE.  Don’t try to do this with your OpenEVSE still\nconnected to mains power!</p>\n<p>Remove the old printed blue cover from your OpenEVSE.  Disconnect\nthe cable leading from the OpenEVSE main board to the LCD display.</p>\n<p>TODO: photo here.</p>"
+        },
+        {
+            "step": 4,
+            "text": "<b>Move the LCD module</b><br>\n<p>Unscrew the LCD module from your old device and screw it onto the new\nLCD mount.  You will then need to attach the new LCD mount to the\nKeypad PCB, using the silkscreen as a guide.  I found that hot glue\nworked well, but other adhesives are probably fine as well.</p>\n<p>TODO: photo here</p>"
+        },
+        {
+            "step": 5,
+            "text": "<b>Mount the new PCB</b><br>\n<p>You will now attach the Keypad PCB to the inside of your new clear\nML-58 enclosure cover.  I found that placing the board inside\nthe cover and then using generous drops of hot glue around the\nscrew bosses secured the Keypad PCB in a reversible manner, so that I\ncould still remove it if I needed to later.</p>\n<p>TODO: photo here</p>\n<p>If you’re braver, a clear contact-sensitive adhesive tape (3M\nmakes a number of different types) would make a more permanent\nbond.  Eliminating the air gap between the front cover and the\nKeypad PCB is said to yield better performance from capacitive touch\nsensors, but the hot-glue method has worked well enough for me.</p>"
+        },
+        {
+            "step": 6,
+            "text": "<b>Connect cables</b><br>\n<p>You will need to connect two cables:</p>\n<ol>\n<li>The LCD cable that you removed in step 3.</li>\n</ol>\n<p>TODO: photo here</p>\n<ol start=\"2\">\n<li>The I2C cable from step 2, from the OpenEVSE Wifi board to the\nSTEMMA-QT-compatible ports on the Keypad PCB.</li>\n</ol>\n<p>TODO: photo here</p>"
+        },
+        {
+            "step": 7,
+            "text": "<b>Reattach the cover</b><br>\n<p>Screw the cover back on the OpenEVSE!</p>\n<p>TODO: photo here</p>"
+        },
+        {
+            "step": 8,
+            "text": "<b>Update OpenEVSE firmware</b><br>\n<p>You’ll need to reflash the OpenEVSE to the latest firmware.  The\ngood news is that you can do this over the web interface!</p>\n<p>TODO: instructions here</p>"
+        },
+        {
+            "step": 9,
+            "text": "<b>Add some PINs and cards</b><br>\n<p>TODO: instructions here</p>"
+        }
+    ],
+    "relationships": [
+        {
+            "type": "reference",
+            "url": "https://www.openevse.com/",
+            "title": "OpenEVSE project"
+        },
+        {
+            "type": "reference",
+            "url": "https://hackaday.io/project/194656-openevse-capacitive-keypad-rfid",
+            "title": "Hackaday page for this project"
+        }
+    ]
+}
