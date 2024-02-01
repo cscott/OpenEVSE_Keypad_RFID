@@ -1,4 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "Keypad")(type "KiCad")(uri "${KIPRJMOD}/Keypad.kicad_sym")(options "")(descr ""))
-)
