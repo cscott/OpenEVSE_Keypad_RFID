@@ -124,6 +124,46 @@ TODO: instructions here
 
 TODO: instructions here
 
+### Step 9: Optional improvements
+
+The Keypad PCB also contains an MCP9808 temperature sensor and pads
+for a DS3231MZ real-time clock.  Some older versions of the OpenEVSE
+hardware contained an MCP9808 daisy-chained from the LCD module and
+secured to the front cover.  If your hardware is like this, then
+you can use the MCP9808 on the board by connecting the LCD display
+to this port on the keypad PCB:
+
+TODO: photo here
+
+You should be able to use your existing cable, but if you have to
+purchase or fabricate a new one, it's a STEMMA-QT compatible JST-SH
+(1.0mm pitch) on the Keypad PCB side.  On my example, it was JST-PH
+(2.0mm pitch) on the LCD side, and you can [buy an appropriate cable
+from Adafruit](https://www.adafruit.com/product/4424).
+
+Similarly, *newer* versions of the OpenEVSE hardware omit the
+real-time clock which was present on the original OpenEVSE LCD modules.
+The justification is that, with ubiquitous network connectivity,
+you don't need to pay the steep price (~$10) for a clock chip when
+instead you can just ask the network what time it is.
+
+However, if you have intermittent network connectivity at your
+installation site, you might want the peace of mind of knowing that
+your usage timestamps will always be correct.  Because the RTC chip
+is not cheap, it is not populated on the keypad PCB by default,
+although all of its support components are present.  You can buy
+an appropriate chip ([Digikey part link](https://www.digikey.com/en/products/detail/analog-devices-inc-maxim-integrated/DS3231MZ/2754396))
+and battery connector ([Digikey part link](https://www.digikey.com/en/products/detail/mpd-memory-protection-devices/BC-2003-TR/5027929))
+and hand-solder them onto the footprints provided.  While you've got
+the soldering iron hot, you will most likely want to *remove* the
+MCP9808 chip present on the Keypad PCB, since as far as I'm aware
+all of the LCD modules *missing* the RTC *also* have the MCP9808
+already present on the LCD board.  You don't want two MCP9808s trying
+to talk on the same I2C bus.
+
+After adding the RTC, you'd connect the I2C cable from the LCD
+module to the Keypad PCB just as done for the MCP9808 above.
+
 ## Related
 
 * [OpenEVSE] project
