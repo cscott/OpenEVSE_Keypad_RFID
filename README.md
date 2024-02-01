@@ -41,7 +41,9 @@ be able to reuse the one from your existing OpenEVSE device, but
 you'll need to pry the glue off then cut down the top bar. It's
 probably easier just to print a new one.
 
-TODO: image and STL of LCD mount.
+[`lcd-trim-more.stl`]
+
+<img src="./lcd-trim-more.png" width=150 />
 
 For compatibility with the latest OpenEVSE web interface, you will
 also need to update the firmware on your main OpenEVSE controller
@@ -176,4 +178,5 @@ OpenEVSE designs.
 
 [OpenEVSE]: https://www.openevse.com/
 [Hackaday page for this project]: https://hackaday.io/project/194656-openevse-capacitive-keypad-rfid
+[`lcd-trim-more.stl`]: ./lcd-trim-more.stl
 [CC-BY-SA-4.0]: https://spdx.org/licenses/CC-BY-SA-4.0.html

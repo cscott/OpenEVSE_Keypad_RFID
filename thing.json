@@ -50,7 +50,10 @@
         },
         {
             "partNumber": "4",
-            "description": "LCD mount"
+            "description": "LCD mount",
+            "type": "generated",
+            "url": "lcd-trim-more.stl",
+            "mimetype": "application/sla"
         },
         {
             "partNumber": "5",
@@ -61,7 +64,7 @@
     "instructions": [
         {
             "step": 1,
-            "text": "<b>Purchase components</b><br>\n<p>You will need to purchase a new\n<a href=\"https://www.polycase.com/ml-58f\">Polycase ML-58 enclosure</a>, although\nthe only part we will need from it is the clear front cover.  (Perhaps\nwe can arrange a special purchase of just the cover if demand\nwarrants.)</p>\n<p>You will also need to purchase or have the Keypad PCB fabricated.  The\nKiCad design files are in the <a href=\"https://github.com/cscott/OpenEVSE_Keypad_RFID/raw/master/Keypad-Front\"><code>Keypad-Front</code></a>\nsubdirectory. It’s a four-layer PCB, and I recommend white silkscreen\nto avoid heating when in direct sun.  I used 1oz copper on a standard\n1.6mm thick PCB.  I found that <a href=\"https://jlcpcb.com/\">JLCPCB</a> had\nvery reasonable prices.</p>\n<p>I assume you also own an\n<a href=\"https://store.openevse.com/collections/all-products\">OpenEVSE Advanced Series</a>\nand have assembled it.</p>\n<p>You will also need an LCD mount, which can be 3d printed.  You <em>might</em>\nbe able to reuse the one from your existing OpenEVSE device, but\nyou’ll need to pry the glue off then cut down the top bar. It’s\nprobably easier just to print a new one.</p>\n<p>TODO: image and STL of LCD mount.</p>\n<p>For compatibility with the latest OpenEVSE web interface, you will\nalso need to update the firmware on your main OpenEVSE controller\nboard.  This is out of scope for this guide, but you can find\ninstructions HERE.  It’s a good thing to do between step 3 and 4\nwhen you have your OpenEVSE charger disconnected and open.</p>"
+            "text": "<b>Purchase components</b><br>\n<p>You will need to purchase a new\n<a href=\"https://www.polycase.com/ml-58f\">Polycase ML-58 enclosure</a>, although\nthe only part we will need from it is the clear front cover.  (Perhaps\nwe can arrange a special purchase of just the cover if demand\nwarrants.)</p>\n<p>You will also need to purchase or have the Keypad PCB fabricated.  The\nKiCad design files are in the <a href=\"https://github.com/cscott/OpenEVSE_Keypad_RFID/raw/master/Keypad-Front\"><code>Keypad-Front</code></a>\nsubdirectory. It’s a four-layer PCB, and I recommend white silkscreen\nto avoid heating when in direct sun.  I used 1oz copper on a standard\n1.6mm thick PCB.  I found that <a href=\"https://jlcpcb.com/\">JLCPCB</a> had\nvery reasonable prices.</p>\n<p>I assume you also own an\n<a href=\"https://store.openevse.com/collections/all-products\">OpenEVSE Advanced Series</a>\nand have assembled it.</p>\n<p>You will also need an LCD mount, which can be 3d printed.  You <em>might</em>\nbe able to reuse the one from your existing OpenEVSE device, but\nyou’ll need to pry the glue off then cut down the top bar. It’s\nprobably easier just to print a new one.</p>\n<p><a href=\"https://github.com/cscott/OpenEVSE_Keypad_RFID/blob/master/lcd-trim-more.stl\"><code>lcd-trim-more.stl</code></a></p>\n<p>TODO: image and STL of LCD mount.</p>\n<p>For compatibility with the latest OpenEVSE web interface, you will\nalso need to update the firmware on your main OpenEVSE controller\nboard.  This is out of scope for this guide, but you can find\ninstructions HERE.  It’s a good thing to do between step 3 and 4\nwhen you have your OpenEVSE charger disconnected and open.</p>"
         },
         {
             "step": 2,
