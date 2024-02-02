@@ -3,6 +3,11 @@
 Thing tracker at
 https://cscott.github.io/thing-tracker/#/thing/c6539aa6-b8c7-4adf-a22c-1baba5bbef97
 
+There is a [Hackaday page for this project].
+
+Discussion in the OpenEVSE forum at
+https://openev.freshdesk.com/support/discussions/topics/6000067515
+
 ## Description
 
 This repository contains hardware design files for a capacitive
